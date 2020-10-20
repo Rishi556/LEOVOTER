@@ -128,7 +128,7 @@ function processLeoPost(post) {
               nodeError()
               return
             }
-            logger.info(`Voted on leo post by ${post.author} with permlink ${post.permlink}`)
+            logger.info(`Voted on leo post by ${post.author} with permlink ${post.permlink} with account ${accounts[i]}`)
           })
         }
       }, 1000 * 60 * config.vote_delay_min)
