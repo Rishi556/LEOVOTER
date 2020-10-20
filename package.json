@@ -1,6 +1,6 @@
 {
   "name": "LEOVOTER",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -12,6 +12,7 @@
   "dependencies": {
     "@hiveio/hive-js": "^0.8.5",
     "axios": "^0.20.0",
-    "dayjs": "^1.9.1"
+    "dayjs": "^1.9.1",
+    "node-color-log": "^5.2.0"
   }
 }

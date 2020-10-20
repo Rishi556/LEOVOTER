@@ -2,21 +2,23 @@ let hive = require("@hiveio/hive-js")
 let fs = require("fs")
 let axios = require("axios")
 let day = require("dayjs")
+let logger = require("node-color-log")
 let utc = require('dayjs/plugin/utc')
 day.extend(utc)
 
-let lastBlockParsed = -1
 let accounts = []
 let config = {}
 let targets = []
 let gang = []
 
-hive.api.setOptions({ url: "https://api.deathwing.me/" })
+let errorCount = 0
+let currentNode = ""
+let nodes = []
 
 startStreaming()
-update()
+update(true)
 setInterval(() => {
-  update()
+  update(false)
 }, 1000 * 60)
 
 /**
@@ -24,25 +26,44 @@ setInterval(() => {
  * @param {Integer} blockNumber block number to stream
  */
 function getBlock(blockNumber) {
-  hive.api.getBlock(blockNumber, (errB, resultB) => {
-    if (!errB && resultB) {
-      if (blockNumber === lastBlockParsed + 1) {
-        parseBlock(resultB)
-        lastBlockParsed = lastBlockParsed + 1
-        setTimeout(() => {
-          getBlock(lastBlockParsed + 1)
-        }, 0.5 * 1000)
-      } else {
-        setTimeout(() => {
-          getBlock(lastBlockParsed + 1)
-        }, 3000)
-      }
+  let nextBlock = false
+  axios.post(currentNode, { "id": blockNumber, "jsonrpc": "2.0", "method": "call", "params": ["condenser_api", "get_block", [blockNumber]] }).then((res) => {
+    if (res.data.result){
+      logger.info(`Got data for block ${blockNumber} processing now`)
+      let block = res.data.result
+      nextBlock = true
+      parseBlock(block)
+      errorCount = 0 //We are resetting to 0 because we want 3 consecutive fails to switch
+    }
+  }).catch((err) => {
+    logger.error(`Error for block ${blockNumber} trying again in 3 seconds`)
+  }).finally(() => {
+    if (nextBlock){
+      setTimeout(() => {
+        getBlock(blockNumber + 1)
+      }, 0.5 * 1000)
     } else {
+      nodeError()
       setTimeout(() => {
         getBlock(blockNumber)
-      }, 0.5 * 1000)
+      }, 3 * 1000)
     }
   })
+}
+
+/**
+ * Handles if a node errors out. Not all error types get added here, only node not returning data. On config.node_error_switch errors, it changes nodes.
+ */
+function nodeError() {
+  errorCount++
+  logger.warn(`${currentNode} has suffered ${errorCount} errors in a row, at ${config.node_error_switch} it will switch over to the next one`)
+  if (errorCount === config.node_error_switch) {
+    errorCount = 0
+    currentNode = nodes.shift()
+    logger.info(`Switching nodes to ${currentNode}`)
+    hive.api.setOptions({ url: currentNode })
+    nodes.push(currentNode)
+  }
 }
 
 /**
@@ -52,7 +73,7 @@ function getBlock(blockNumber) {
 function parseBlock(block) {
   if (block.transactions.length !== 0) {
     let trxs = block.transactions
-    for (let i in trxs){
+    for (let i in trxs) {
       let trx = trxs[i]
       parseTrx(trx)
     }
@@ -63,22 +84,23 @@ function parseBlock(block) {
  * Parses a trx
  * @param {Object} transaction
  */
-function parseTrx(trx){
+function parseTrx(trx) {
   let ops = trx.operations
-  for (let i in ops){
+  for (let i in ops) {
     let op = ops[i]
-    if (op[0] === "comment"){
+    if (op[0] === "comment") {
       let action = op[1]
       let metadata = {}
       let includesLeoTag = false
       try {
         metadata = JSON.parse(action.json_metadata)
         includesLeoTag = metadata.tags.includes("hive-167922") || metadata.tags.includes("leofinance")
-      } catch (e){
-        //Do jack shit cuz i don't error hanle
+      } catch (e) {
+        //Not handling it but should probably
       }
-      if (targets.includes(action.author) && action.parent_author === "" && (includesLeoTag || (action.parent_permlink === "hive-167922" || action.parent_permlink === "leofinance"))){
+      if (targets.includes(action.author) && action.parent_author === "" && (includesLeoTag || (action.parent_permlink === "hive-167922" || action.parent_permlink === "leofinance"))) {
         processLeoPost(action)
+        logger.info(`Found leo post by ${action.author} with permlink ${action.permlink}. Processing it now`)
       }
     }
   }
@@ -88,21 +110,28 @@ function parseTrx(trx){
  * Process's post
  * @param {Object} post post
  */
-function processLeoPost(post){
+function processLeoPost(post) {
   axios("https://scot-api.steem-engine.com/@rishi556.leo?hive=1").then((result) => {
     let leo_vp = parseInt(result.data.LEO.voting_power) / 100
     let last_vote_time = day.utc(result.data.LEO.last_vote_time).unix()
     let now = day.utc().unix()
     let diff = now - last_vote_time
-    leo_vp = leo_vp + (0.00023148148 * diff)
-    if (leo_vp >= config.min_vp_vote || gang.includes(post.author)){
+    leo_vp = leo_vp + (0.00023148148 * diff) //This is not exact but is close enough that we don't care
+    logger.info(`Leo VP is about ${leo_vp.toFixed(2)}, will only vote if above 80% or author is part of the gang`)
+    if (leo_vp >= config.min_vp_vote || gang.includes(post.author)) {
+      logger.info(`Have enough VP for voting. Will proceed in ${config.vote_delay_min} minutes`)
       setTimeout(() => {
-        for (let i in accounts){
+        for (let i in accounts) {
           hive.broadcast.vote(config.posting_key, accounts[i], post.author, post.permlink, config.vote_weight, (err, result) => {
-            //Don't do shit either way
+            if (err) {
+              logger.error(`Error voting leo post by ${post.author} with permlink ${post.permlink}`)
+              nodeError()
+              return
+            }
+            logger.info(`Voted on leo post by ${post.author} with permlink ${post.permlink}`)
           })
         }
-      }, 1000 * 60 * 3.5)
+      }, 1000 * 60 * config.vote_delay_min)
     }
   })
 }
@@ -128,16 +157,21 @@ async function getStartStreamBlock() {
  */
 async function startStreaming() {
   let startBlock = await getStartStreamBlock()
-  lastBlockParsed = startBlock - 1
   getBlock(startBlock)
 }
 
 /**
  * Updates all 3 things
  */
-function update(){
+function update(isFirst) {
   fs.readFile("config.json", (err, data) => {
     config = JSON.parse(data.toString())
+    if (isFirst) {
+      nodes = config.hive_nodes
+      currentNode = nodes.shift()
+      nodes.push(currentNode)
+      logger.setLevel(config.log_level)
+    }
   })
   fs.readFile("accounts.json", (err, data) => {
     accounts = JSON.parse(data.toString())
