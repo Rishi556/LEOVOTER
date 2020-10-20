@@ -1,0 +1,9 @@
+{
+  "posting_key" : "",
+  "min_vp_vote" : 80,
+  "vote_weight" : 10000,
+  "vote_delay_min" : 3.5,
+  "hive_nodes" : ["https://api.hive.blog", "https://anyx.io", "https://api.deathwing.me"],
+  "node_error_switch" : 3,
+  "log_level" : "info"
+}
