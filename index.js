@@ -60,7 +60,7 @@ function nodeError() {
   if (errorCount === config.node_error_switch) {
     errorCount = 0
     currentNode = nodes.shift()
-    logger.info(`Switching nodes to ${currentNode}`)
+    logger.info(`Switching node to ${currentNode}`)
     hive.api.setOptions({ url: currentNode })
     nodes.push(currentNode)
   }
@@ -167,10 +167,12 @@ function update(isFirst) {
   fs.readFile("config.json", (err, data) => {
     config = JSON.parse(data.toString())
     if (isFirst) {
+      logger.setLevel(config.log_level)
       nodes = config.hive_nodes
       currentNode = nodes.shift()
+      hive.api.setOptions({ url: currentNode })
       nodes.push(currentNode)
-      logger.setLevel(config.log_level)
+      logger.info(`Initial node is set to ${currentNode}`)
     }
   })
   fs.readFile("accounts.json", (err, data) => {
