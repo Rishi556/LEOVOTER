@@ -15,7 +15,6 @@ let errorCount = 0
 let currentNode = ""
 let nodes = []
 
-startStreaming()
 update(true)
 setInterval(() => {
   update(false)
@@ -58,12 +57,19 @@ function nodeError() {
   errorCount++
   logger.warn(`${currentNode} has suffered ${errorCount} errors in a row, at ${config.node_error_switch} it will switch over to the next one`)
   if (errorCount === config.node_error_switch) {
-    errorCount = 0
-    currentNode = nodes.shift()
-    logger.info(`Switching node to ${currentNode}`)
-    hive.api.setOptions({ url: currentNode })
-    nodes.push(currentNode)
+    switchNode()
   }
+}
+
+/**
+ * Switches to next node
+ */
+function switchNode(){
+  errorCount = 0
+  currentNode = nodes.shift()
+  logger.info(`Switching node to ${currentNode}`)
+  hive.api.setOptions({ url: currentNode })
+  nodes.push(currentNode)
 }
 
 /**
@@ -98,9 +104,9 @@ function parseTrx(trx) {
       } catch (e) {
         //Not handling it but should probably
       }
-      if (targets.includes(action.author) && action.parent_author === "" && (includesLeoTag || (action.parent_permlink === "hive-167922" || action.parent_permlink === "leofinance"))) {
+      if (targets.includes(action.author) && action.parent_author === ""  && (includesLeoTag || (action.parent_permlink === "hive-167922" || action.parent_permlink === "leofinance"))) {
         processLeoPost(action)
-        logger.info(`Found leo post by ${action.author} with permlink ${action.permlink}. Processing it now`)
+        logger.info(`Found leo post by ${action.author} with permlink ${action.permlink}. Processing it in ${config.vote_delay_min} minutes`)
       }
     }
   }
@@ -147,12 +153,20 @@ function voteLeoPost(voter, post) {
  */
 async function getStartStreamBlock() {
   return new Promise((resolve, reject) => {
-    hive.api.getDynamicGlobalProperties((err, result) => {
-      if (err) {
-        console.log(err)
-        return reject(err)
+    axios.post(currentNode, { "id": 0, "jsonrpc": "2.0", "method": "condenser_api.get_dynamic_global_properties", "params": [] }).then((res) => {
+      if (res.data.result) {
+        return resolve(res.data.result.last_irreversible_block_num)
+      } else {
+        logger.error(`Wasn't able to get first block. Attempting to change nodes and try again.`)
+        switchNode()
+        startStreaming()
+        return reject()
       }
-      return resolve(result.last_irreversible_block_num)
+    }).catch(() => {
+      logger.error(`Wasn't able to get first block. Attempting to change nodes and try again.`)
+      switchNode()
+      startStreaming()
+      return reject()
     })
   })
 }
@@ -161,7 +175,7 @@ async function getStartStreamBlock() {
  * Starts streaming the hive blockchain
  */
 async function startStreaming() {
-  let startBlock = await getStartStreamBlock()
+  let startBlock = await getStartStreamBlock().catch(() => {return})
   getBlock(startBlock)
 }
 
@@ -178,6 +192,8 @@ function update(isFirst) {
       hive.api.setOptions({ url: currentNode })
       nodes.push(currentNode)
       logger.info(`Initial node is set to ${currentNode}`)
+      logger.info(`Starting up...`)
+      startStreaming()
     }
   })
   fs.readFile("accounts.json", (err, data) => {
