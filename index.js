@@ -28,7 +28,7 @@ setInterval(() => {
 function getBlock(blockNumber) {
   let nextBlock = false
   axios.post(currentNode, { "id": blockNumber, "jsonrpc": "2.0", "method": "call", "params": ["condenser_api", "get_block", [blockNumber]] }).then((res) => {
-    if (res.data.result){
+    if (res.data.result) {
       logger.info(`Got data for block ${blockNumber} processing now`)
       let block = res.data.result
       nextBlock = true
@@ -38,7 +38,7 @@ function getBlock(blockNumber) {
   }).catch((err) => {
     logger.error(`Error for block ${blockNumber} trying again in 3 seconds`)
   }).finally(() => {
-    if (nextBlock){
+    if (nextBlock) {
       setTimeout(() => {
         getBlock(blockNumber + 1)
       }, 0.5 * 1000)
@@ -111,27 +111,32 @@ function parseTrx(trx) {
  * @param {Object} post post
  */
 function processLeoPost(post) {
-  axios("https://scot-api.steem-engine.com/@rishi556.leo?hive=1").then((result) => {
+  setTimeout(() => {
+    for (let i in accounts) {
+      voteLeoPost(accounts[i], post)
+    }
+  }, 1000 * 60 * config.vote_delay_min)
+
+}
+
+function voteLeoPost(voter, post) {
+  axios(`https://scot-api.steem-engine.com/@${voter}?hive=1`).then((result) => {
     let leo_vp = parseInt(result.data.LEO.voting_power) / 100
     let last_vote_time = day.utc(result.data.LEO.last_vote_time).unix()
     let now = day.utc().unix()
     let diff = now - last_vote_time
     leo_vp = leo_vp + (0.00023148148 * diff) //This is not exact but is close enough that we don't care
-    logger.info(`Leo VP is about ${leo_vp.toFixed(2)}, will only vote if above 80% or author is part of the gang`)
+    logger.info(`Leo VP is about ${leo_vp.toFixed(2)} for ${voter}, will only vote if above 80% or author is part of the gang`)
     if (leo_vp >= config.min_vp_vote || gang.includes(post.author)) {
-      logger.info(`Have enough VP for voting. Will proceed in ${config.vote_delay_min} minutes`)
-      setTimeout(() => {
-        for (let i in accounts) {
-          hive.broadcast.vote(config.posting_key, accounts[i], post.author, post.permlink, config.vote_weight, (err, result) => {
-            if (err) {
-              logger.error(`Error voting leo post by ${post.author} with permlink ${post.permlink}`)
-              nodeError()
-              return
-            }
-            logger.info(`Voted on leo post by ${post.author} with permlink ${post.permlink} with account ${accounts[i]}`)
-          })
+      logger.info(`${voter} will vote post because they have enough vp or the author is part of the gang.`)
+      hive.broadcast.vote(config.posting_key, voter, post.author, post.permlink, config.vote_weight, (err, result) => {
+        if (err) {
+          logger.error(`Error voting leo post by ${post.author} with permlink ${post.permlink} for ${voter}`)
+          nodeError()
+          return
         }
-      }, 1000 * 60 * config.vote_delay_min)
+        logger.info(`Voted on leo post by ${post.author} with permlink ${post.permlink} with account ${voter}`)
+      })
     }
   })
 }
