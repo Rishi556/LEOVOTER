@@ -126,7 +126,7 @@ function processLeoPost(post) {
 }
 
 function voteLeoPost(voter, post) {
-  axios(`https://scot-api.steem-engine.com/@${voter}?hive=1`).then((result) => {
+  axios(`https://scot-api.hive-engine.com/@${voter}?hive=1`).then((result) => {
     let leo_vp = parseInt(result.data.LEO.voting_power) / 100
     let last_vote_time = day.utc(result.data.LEO.last_vote_time).unix()
     let now = day.utc().unix()
